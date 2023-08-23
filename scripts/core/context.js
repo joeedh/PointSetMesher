@@ -31,8 +31,16 @@ export class Context {
     return simple.Editor.findEditor(Workspace);
   }
 
+  get toolmode() {
+    return this.workspace.toolmode;
+  }
+
+  get toolmode_i() {
+    return this.workspace.toolmode_i;
+  }
+
   get selMask() {
-    return config.SELECTMASK;
+    return 1; //XXX this.workspace.toolmode.selMask;
   }
 
   get mesh() {

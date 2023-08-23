@@ -3,7 +3,8 @@ import {
   startMenu
 } from '../path.ux/pathux.js';
 import {getElemColor} from './mesh.js';
-import {MeshEditor} from './mesh_editor.js';
+import {ToolMode, ToolModeClasses} from '../toolmodes/toolmode.js';
+import '../toolmodes/all_tools.js';
 
 export class LoadDefaultsOp extends ToolOp {
   static tooldef() {
@@ -27,16 +28,17 @@ export class Workspace extends simple.Editor {
   constructor() {
     super();
 
+    this.editMenu = [];
     this.canvas = document.createElement("canvas");
     this.g = this.canvas.getContext("2d");
 
     this.mpos = new Vector2();
 
-    this.toolmode = new MeshEditor();
+    this.toolmode = undefined;
+
     this.shadow.appendChild(this.canvas);
 
     this.keymap = new KeyMap();
-
     this.keymap.add(new HotKey("Space", [], () => {
       let menu = [];
 
@@ -53,6 +55,8 @@ export class Workspace extends simple.Editor {
 
       console.log(menu);
     }));
+
+    this.switchToolMode("split_edge");
 
     let eventBad = (e) => {
       if (haveModal()) {
@@ -114,6 +118,28 @@ export class Workspace extends simple.Editor {
     }
   }
 
+  switchToolMode(name) {
+    let cls = ToolMode.getClass(name);
+
+    if (cls === undefined) {
+      throw new Error("Unknown tool mode " + name);
+    }
+
+    if (this.toolmode && this.toolmode instanceof cls) {
+      return;
+    }
+
+    if (this.toolmode) {
+      this.toolmode.on_inactivate();
+    }
+
+    this.toolmode = new cls(this.ctx);
+    this.toolmode_i = ToolMode.getClassIndex(name);
+
+    this.toolmode.on_activate();
+    this.regenEditMenu();
+  }
+
   getGlobalMouse(x, y) {
     let mpos = new Vector2();
     let r = this.canvas.getBoundingClientRect();
@@ -142,6 +168,41 @@ export class Workspace extends simple.Editor {
     return [this.keymap, this.toolmode.keymap];
   }
 
+
+  regenEditMenu() {
+    let menu = this.editMenu;
+
+    menu.length = 0;
+
+    menu.push(["Undo", () => {
+      this.ctx.toolstack.undo();
+    }, new HotKey("Z", ["CTRL"], "").buildString()]);
+
+    menu.push(["Redo", () => {
+      this.ctx.toolstack.redo();
+    }, new HotKey("Z", ["CTRL", "SHIFT"], "").buildString()]);
+
+    let doKeyMap = (keymap) => {
+      for (let hk of keymap) {
+        if (typeof hk.action !== "string") {
+          continue;
+        }
+
+        let key = hk.action;
+        if (hk.uiname) {
+          key += "|" + hk.uiname;
+        }
+        key += "::" + hk.buildString();
+
+        menu.push(key);
+      }
+    };
+
+    for (let keymap of this.getKeyMaps()) {
+      doKeyMap(keymap);
+    }
+  }
+
   init() {
     super.init();
 
@@ -151,6 +212,8 @@ export class Workspace extends simple.Editor {
 
     let header = this.header;
     let row;
+
+    header.dynamicMenu("Edit", this.editMenu);
 
     row = header.row();
     row.iconbutton(Icons.UNDO, "Undo", () => {
@@ -195,8 +258,6 @@ export class Workspace extends simple.Editor {
     }
 
     this.g.clearRect(0, 0, canvas.width, canvas.height);
-    console.log("draw!");
-
     this.toolmode.draw(this.ctx, this.canvas, this.g);
   }
 

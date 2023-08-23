@@ -228,11 +228,16 @@ export class PropertiesBag {
   }
 
   _save() {
-    for (let prop of this._props) {
-      prop.setValue(this[prop.apiname]);
+    window.draw_ignore_push();
+
+    try {
+      for (let prop of this._props) {
+        prop.setValue(this[prop.apiname]);
+      }
+    } finally {
+      window.draw_ignore_pop();
     }
 
-    console.log("SAVE PROPS", util.list(this._props));
     return this._props;
   }
 
@@ -311,7 +316,6 @@ export class PropsEditor extends Container {
 
     this.clear();
 
-    console.log("Columns", cols);
     cols = (new Array(cols).fill(1)).map(c => this.col());
     let i = 0;
 

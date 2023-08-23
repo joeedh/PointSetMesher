@@ -1,7 +1,8 @@
 import {
   Vector2, Vector3, Vector4, Matrix4,
-  Quat, util, math, nstructjs, BaseVector
+  Quat, util, math, nstructjs, BaseVector, closest_point_on_line
 } from '../path.ux/pathux.js';
+
 import config from '../config/config.js';
 
 'use strict';
@@ -234,7 +235,15 @@ Handle.STRUCT = nstructjs.inherit(Handle, Element, "mesh.Handle") + `
 `;
 nstructjs.register(Handle);
 
-let _evaluate_vs = util.cachering.fromConstructor(Vector3, 64);
+let _evaluate_vs = util.cachering.fromConstructor(Vector3, 512);
+
+class ClosestPointRet {
+  p = new Vector3();
+  t = 0;
+}
+
+let _closest_rets = util.cachering.fromConstructor(ClosestPointRet, 512);
+let _closest_temp_v1 = new Vector3();
 
 export class Edge extends Element {
   constructor() {
@@ -243,6 +252,21 @@ export class Edge extends Element {
     this.h1 = this.h2 = undefined;
     this.v1 = this.v2 = undefined;
     this.l = undefined;
+  }
+
+  closestPoint(co) {
+    if (co.length == 2) {
+      co = _closest_temp_v1.loadXY(co[0], co[1]);
+      co[2] = 0.0;
+    }
+
+    let c = math.closest_point_on_line(co, this.v1, this.v2, true);
+
+    let ret = _closest_rets.next();
+    ret.p.load(c[0]);
+    ret.t = c[1]/this.v1.vectorDistance(this.v2);
+
+    return ret;
   }
 
   get loops() {
@@ -895,10 +919,22 @@ mesh.ElementArray {
 `
 nstructjs.register(ElementArray);
 
+class EIDMap extends Map {
+  get(key, elem_typemask = undefined) {
+    let elem = super.get(key);
+
+    if (elem && elem_typemask !== undefined && !(elem.type & elem_typemask)) {
+      return undefined;
+    }
+
+    return elem;
+  }
+}
+
 export class Mesh {
   constructor() {
     this.eidgen = new util.IDGen();
-    this.eidMap = new Map();
+    this.eidMap = new EIDMap();
 
     this.verts = undefined;
     this.lists = undefined;
@@ -982,7 +1018,7 @@ export class Mesh {
     return this;
   }
 
-  setHighlight(elem) {
+  setHighlight(elem, clear_other_types = false) {
     let ret = false;
 
     if (!elem) {
@@ -993,6 +1029,17 @@ export class Mesh {
     } else {
       ret = this.elists[elem.type].highlight !== elem;
       this.elists[elem.type].highlight = elem;
+    }
+
+    if (clear_other_types && elem) {
+      for (let k in this.elists) {
+        let elist = this.elists[k];
+
+        if (elist.type !== elem.type) {
+          ret ||= elist.highlight;
+          elist.highlight = undefined;
+        }
+      }
     }
 
     return ret;
@@ -1317,6 +1364,7 @@ export class Mesh {
     }
   }
 
+  /** Returns [new edge, new vertex]. */
   splitEdge(e, t = 0.5) {
     let nv = this.makeVertex(e.v1).interp(e.v2, t);
     let ne = this.makeEdge(nv, e.v2);
@@ -1630,7 +1678,7 @@ export class Mesh {
 
     this.addElistAliases();
 
-    let eidMap = this.eidMap = new Map();
+    let eidMap = this.eidMap = new EIDMap();
 
     for (let list of this.getElists()) {
       for (let elem of list) {

@@ -3,25 +3,116 @@ import config from '../config/config.js';
 import {
   KeyMap, color2css, css2color,
   Vector3, Matrix4, Quat, util, nstructjs, math,
-  Vector4, UIBase, HotKey, haveModal, Vector2
+  Vector4, UIBase, HotKey, haveModal, Vector2,
+  EnumProperty
 } from '../path.ux/scripts/pathux.js';
 
-import {getElemColor, MeshTypes, MeshFlags, MeshFeatures} from './mesh.js';
-import './mesh_ops.js';
-import './transform_ops.js';
-import './mesh_selectops.js';
+import {getElemColor, MeshTypes, MeshFlags, MeshFeatures} from '../core/mesh.js';
+import '../core/mesh_ops.js';
+import '../core/transform_ops.js';
+import '../core/mesh_selectops.js';
 
-import {SelToolModes} from './mesh_ops.js';
+import {SelToolModes} from '../core/mesh_ops.js';
 
-export class ToolModeBase {
+export const ToolModeClasses = [];
+
+export let toolModeEnumProp;
+
+export function getToolEnumProp() {
+  if (toolModeEnumProp) {
+    return toolModeEnumProp;
+  }
+
+  let enumdef = {};
+  let uinames = {};
+  let descr = {};
+  let icons = {};
+  let i = 0;
+
+  for (let cls of ToolModeClasses) {
+    let def = cls.toolDefine;
+
+    enumdef[def.typeName] = i++;
+    uinames[def.typeName] = def.uiName;
+    icons[def.typeName] = def.icon ?? -1;
+    descr[def.typeName] = def.description ?? "";
+  }
+
+
+  toolModeEnumProp = new EnumProperty(undefined, enumdef)
+    .addIcons(icons)
+    .addUINames(uinames)
+    .addDescriptions(descr);
+
+  return toolModeEnumProp;
+}
+
+export class ToolMode {
   constructor(ctx) {
     this.ctx = ctx;
     this.keymap = new KeyMap()
+    this.selMask = this.constructor.toolDefine.selMask;
+    this.highMask = this.selMask; /* Highlight mask. */
   }
 
   getEditMenu() {
     return [];
   }
+
+  on_activate() {
+    window.redraw_all();
+  }
+
+  on_inactivate() {
+  }
+
+  static getClass(name) {
+    for (let cls of ToolModeClasses) {
+      if (cls.toolDefine.typeName === name) {
+        return cls;
+      }
+    }
+  }
+
+  static getClassIndex(name) {
+    let i = 0;
+
+    for (let cls of ToolModeClasses) {
+      if (cls.toolDefine.typeName === name) {
+        return i;
+      }
+
+      i++;
+    }
+  }
+
+  static register(cls) {
+    if (!cls.hasOwnProperty("toolDefine")) {
+      throw new Error(cls.name + " lacks a toolDefine static property");
+    }
+
+    let def = cls.toolDefine;
+
+    if (!def.typeName) {
+      throw new Error("toolDefine lacks typeName");
+    }
+    if (!def.uiName) {
+      throw new Error("toolDefine lacks uiName");
+    }
+    if (def.selMask === undefined) {
+      throw new Error("toolDefine lacks selMask");
+    }
+
+    ToolModeClasses.push(cls);
+  }
+
+  static toolDefine = {
+    typeName   : "",
+    uiName     : "",
+    icon       : undefined, /* Optional icon, e.g. `Icons.XXX` */
+    selMask    : 0, /* e.g. `MeshTypes.VERTEX | MeshTypes.HANDLE` */
+    description: undefined, /* Tooltip string */
+  };
 
   on_mousedown(localX, localY, e) {
 
@@ -62,7 +153,7 @@ export class PickData {
 
 let pick_cachering = util.cachering.fromConstructor(PickData, 32);
 
-export class MeshEditor extends ToolModeBase {
+export class MeshToolBase extends ToolMode {
   constructor(ctx) {
     super(ctx);
 
@@ -70,19 +161,19 @@ export class MeshEditor extends ToolModeBase {
     this.mpos = new Vector2();
 
     this.keymap = new KeyMap([
-      new HotKey("A", ["CTRL"], "mesh.toggle_select_all(mode='ADD')"),
-      new HotKey("A", [], "mesh.toggle_select_all(mode='ADD')"),
-      new HotKey("A", ["ALT"], "mesh.toggle_select_all(mode='SUB')"),
-      new HotKey("A", ["CTRL", "SHIFT"], "mesh.toggle_select_all(mode='SUB')"),
-      new HotKey("G", [], "transform.translate()"),
-      new HotKey("S", [], "transform.scale()"),
-      new HotKey("R", [], "transform.rotate()"),
-      new HotKey("E", [], "mesh.split_edge()"),
+      new HotKey("A", ["CTRL"], "mesh.toggle_select_all(mode='ADD')|Select All"),
+      new HotKey("A", [], "mesh.toggle_select_all(mode='ADD')|Select All"),
+      new HotKey("A", ["ALT"], "mesh.toggle_select_all(mode='SUB')|Deselect All"),
+      new HotKey("A", ["CTRL", "SHIFT"], "mesh.toggle_select_all(mode='SUB')|Deselect All"),
+      new HotKey("G", [], "transform.translate()|Move"),
+      new HotKey("S", [], "transform.scale()|Scale"),
+      new HotKey("R", [], "transform.rotate()|Rotate"),
+      new HotKey("E", [], "mesh.split_selected_edges()"),
       new HotKey("D", [], "mesh.dissolve_vertex()"),
       new HotKey("X", [], "mesh.delete()"),
       new HotKey("Delete", [], "mesh.delete()"),
-      new HotKey("L", [], "mesh.select_linked(pick=true mode='ADD')"),
-      new HotKey("L", ["SHIFT"], "mesh.select_linked(pick=true mode='SUB')"),
+      new HotKey("L", [], "mesh.select_linked(pick=true mode='ADD')|Select Linked"),
+      new HotKey("L", ["SHIFT"], "mesh.select_linked(pick=true mode='SUB')|Deselect Linked"),
       new HotKey("F", [], "mesh.make_face"),
     ])
 
@@ -167,7 +258,7 @@ export class MeshEditor extends ToolModeBase {
     return ret;
   }
 
-  pick(localX, localY, selmask = config.SELECTMASK, limit = 25) {
+  pick(localX, localY, highMask = this.highMask, limit = 25) {
     let mesh = this.ctx.mesh;
 
     let mpos = new Vector3();
@@ -179,6 +270,7 @@ export class MeshEditor extends ToolModeBase {
     limit *= dpi;
 
     let mindis, minret;
+    const do_point = highMask & (MeshTypes.VERTEX | MeshTypes.EDGE);
 
     let vlist = (list) => {
       for (let v of list) {
@@ -200,11 +292,36 @@ export class MeshEditor extends ToolModeBase {
       }
     }
 
-    if (selmask & MeshTypes.VERTEX) {
+    const point_pad_min = config.POINT_EDGE_PAD.min;
+    const point_pad_max = config.POINT_EDGE_PAD.max;
+    const point_pad_perc = config.POINT_EDGE_PAD.percent;
+
+    if (highMask & MeshTypes.EDGE) {
+      let mine, mindis_e;
+
+      for (let e of mesh.edges) {
+        let dis = math.dist_to_line_2d(mpos, e.v1, e.v2);
+
+        let point_pad = e.v1.vectorDistance(e.v2)*point_pad_perc;
+        point_pad = Math.min(Math.max(point_pad, point_pad_min), point_pad_max);
+
+        if (dis < limit && (mindis === undefined || dis < mindis_e)) {
+          mindis_e = dis;
+          mindis = dis + point_pad;
+          mine = e;
+        }
+      }
+
+      if (mine) {
+        minret = pick_cachering.next().load(mine, MeshTypes.EDGE, mindis_e);
+      }
+    }
+
+    if (highMask & MeshTypes.VERTEX) {
       vlist(mesh.verts);
     }
 
-    if (selmask & MeshTypes.HANDLE) {
+    if (highMask & MeshTypes.HANDLE) {
       vlist(mesh.handles);
     }
 
@@ -214,6 +331,7 @@ export class MeshEditor extends ToolModeBase {
   on_mousedown(localX, localY, e) {
     this.mdown = e.button === 0;
     this.startMpos.loadXY(localX, localY);
+    this.mpos.load(this.startMpos);
 
     this.updateHighlight(localX, localY);
 
@@ -231,8 +349,11 @@ export class MeshEditor extends ToolModeBase {
         }
       }
 
-      let mode;
+      if (!(this.selMask & type)) {
+        return false;
+      }
 
+      let mode;
       if (e.shiftKey) {
         mode = elem.flag & MeshFlags.SELECT ? SelToolModes.SUB : SelToolModes.ADD;
       } else {
@@ -244,14 +365,8 @@ export class MeshEditor extends ToolModeBase {
         unique : !e.shiftKey,
         elemEid: elem.eid,
       });
-    } else if (e.button === 0 && config.ENABLE_EXTRUDE) {
-      let co = new Vector3([localX, localY, 0]);
 
-      this.ctx.api.execTool(this.ctx, "mesh.extrude_vertex", {
-        co
-      });
-
-      this.updateHighlight(localX, localY);
+      return true;
     }
   }
 
@@ -262,8 +377,7 @@ export class MeshEditor extends ToolModeBase {
     let update = false;
 
     /* Clear all other highlight. */
-    mesh.setHighlight(undefined);
-    update = mesh.setHighlight(elem);
+    update = mesh.setHighlight(elem, true);
     //console.log("set highlight", update);
 
     if (update) {
@@ -286,7 +400,7 @@ export class MeshEditor extends ToolModeBase {
       let mesh = this.ctx.mesh;
 
       let act = false;
-      let selmask = this.ctx.selMask;
+      let selmask = this.selMask;
 
       for (let elist of mesh.getElists()) {
         if (!(elist.type & selmask)) {

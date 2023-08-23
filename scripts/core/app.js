@@ -9,11 +9,13 @@ import {FileArgs} from '../path.ux/scripts/simple/file.js';
 import {PropertiesBag} from './property_templ.js';
 import {Context} from './context.js';
 
-export const STARTUP_FILE_KEY = "_startup_file_1";
+export const STARTUP_FILE_KEY = "_startup_file_apss";
 
 export const Properties = {
-  steps  : {type: "int", value: 1, min: 0, max: 10, slideSpeed : 5},
+  dimen  : {type: "int", value: 1, min: 32, max: 1024, slideSpeed: 15, baseUnit: "none", displayUnit: "none"},
   boolVal: {type: "bool", value: true},
+  dist   : {type: "float", value: 0.5, baseUnit: "meter", displayUnit: "meter"},
+  percent: {type: "float", value: 0.5, displayUnit: "percent", baseUnit: "none", min: 0.0, max: 1.0, decimalPlaces: 0},
 };
 
 window.addEventListener("contextmenu", (e) => {
@@ -33,6 +35,8 @@ window.addEventListener("contextmenu", (e) => {
 export class App extends simple.AppState {
   constructor() {
     super(Context);
+
+    this.doAutoSave = true;
 
     this.mesh = undefined;
     this.properties = undefined;
@@ -80,7 +84,14 @@ export class App extends simple.AppState {
       this.loadFile(json);
     } catch (error) {
       util.print_stack(error);
-      console.warn("Failed to load startup file");
+      this.doAutoSave = false;
+      console.warn("Failed to load startup file; disabling save timer");
+
+      this.createNewFile();
+
+      if (this.ctx) {
+        this.ctx.error("Load error; disabling autosave");
+      }
     }
   }
 
@@ -132,12 +143,25 @@ export class App extends simple.AppState {
     }
   }
 
+  on_tick() {
+    if (this.doAutoSave && util.pollTimer("save", 1000)) {
+      this.saveStartupFile();
+    }
+  }
+
   start() {
-    super.start({
-      DEBUG: {
-        modalEvents: true
-      }
-    });
+    try {
+      super.start({
+        iconsheet: document.getElementById("iconsheet"),
+        DEBUG    : {
+          modalEvents: true
+        }
+      });
+    } catch (error) {
+      this.doAutoSave = false;
+      util.print_stack(error);
+      throw error;
+    }
 
     this.loadStartupFile();
   }
@@ -145,6 +169,12 @@ export class App extends simple.AppState {
 
 export function start() {
   console.log("start!");
+
+  window.setInterval(() => {
+    if (window._appstate) {
+      window._appstate.on_tick();
+    }
+  }, 55);
 
   let animreq = undefined;
 
@@ -154,11 +184,20 @@ export function start() {
     _appstate.draw();
   }
 
+  let ignore_lvl = 0;
+  window.draw_ignore_push = function () {
+    ignore_lvl++;
+  }
+  window.draw_ignore_pop = function () {
+    ignore_lvl = Math.max(ignore_lvl - 1, 0);
+  }
+
   window.redraw_all = function () {
-    if (animreq) {
+    if (animreq || ignore_lvl) {
       return;
     }
 
+    console.warn("redraw_all");
     animreq = requestAnimationFrame(f);
   }
 

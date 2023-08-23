@@ -172,7 +172,7 @@ export class TransformOp extends ToolOp {
   static tooldef() {
     return {
       inputs: {
-        selMask: new FlagProperty(config.SELECTMASK, MeshTypes),
+        selMask: new FlagProperty(MeshTypes.VERTEX | MeshTypes.HANDLE, MeshTypes),
         center : new VecProperty()
       }
     }
@@ -394,7 +394,7 @@ export class ScaleOp extends TransformOp {
     let scenter = workspace.getGlobalMouse(center[0], center[1]);
 
     this.makeTempLine([e.x, e.y], scenter);
-    
+
     let ratio = l2/l1;
     let scale = new Vector().addScalar(1.0);
 

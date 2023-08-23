@@ -14,5 +14,5 @@ export const MeshFlags = {
 }
 
 export const MeshFeatures = {
-  HANDLES : 1
+  HANDLES : 0
 };

@@ -45,11 +45,11 @@ export class MeshOp extends ToolOp {
   }
 }
 
-export class SplitEdgeOp extends MeshOp {
+export class SplitSelectedEdgesOp extends MeshOp {
   static tooldef() {
     return {
-      uiname  : "Split Edge",
-      toolpath: "mesh.split_edge",
+      uiname  : "Split Selected Edges",
+      toolpath: "mesh.split_selected_edges",
       inputs  : ToolOp.inherit({})
     }
   }
@@ -63,8 +63,42 @@ export class SplitEdgeOp extends MeshOp {
   }
 }
 
-ToolOp.register(SplitEdgeOp);
+ToolOp.register(SplitSelectedEdgesOp);
 
+export class SplitEdgeOp extends MeshOp {
+  static tooldef() {
+    return {
+      uiname  : "Split Edge",
+      toolpath: "mesh.split_edge",
+      inputs  : ToolOp.inherit({
+        edgeEid: new IntProperty(-1).private(),
+        t      : new FloatProperty(0.5).noUnits(),
+      })
+    }
+  }
+
+  exec(ctx) {
+    let {edgeEid, t} = this.getInputs();
+    let mesh = ctx.mesh;
+
+    let e = mesh.eidMap.get(edgeEid, MeshTypes.EDGE);
+
+    if (!e) {
+      ctx.error("Invalid edge " + edgeEid);
+      return;
+    }
+
+    let v = mesh.splitEdge(e, t)[1];
+
+    mesh.clearHighlight();
+    mesh.selectNone();
+
+    mesh.setSelect(v, true);
+    mesh.verts.highlight = v;
+  }
+}
+
+ToolOp.register(SplitEdgeOp);
 
 export class DissolveVertOp extends MeshOp {
   static tooldef() {
@@ -93,7 +127,7 @@ export class DeleteOp extends MeshOp {
       uiname  : "Delete",
       toolpath: "mesh.delete",
       inputs  : ToolOp.inherit({
-        selMask: new FlagProperty(config.SELECTMASK, MeshTypes)
+        selMask: new FlagProperty(MeshTypes.VERTEX | MeshTypes.EDGE | MeshTypes.FACE, MeshTypes)
       })
     }
   }
@@ -163,7 +197,7 @@ export class ExtrudeVertOp extends MeshOp {
       uiname  : "Extrude Vertex",
       toolpath: "mesh.extrude_vertex",
       inputs  : ToolOp.inherit({
-        co : new Vec3Property()
+        co: new Vec3Property()
       })
     }
   }
@@ -194,6 +228,7 @@ export class ExtrudeVertOp extends MeshOp {
     window.redraw_all();
   }
 }
+
 ToolOp.register(ExtrudeVertOp);
 
 
@@ -203,7 +238,7 @@ export class MakeFaceOp extends MeshOp {
       uiname  : "Make Face",
       toolpath: "mesh.make_face",
       inputs  : ToolOp.inherit({
-        co : new Vec3Property()
+        co: new Vec3Property()
       })
     }
   }
@@ -290,14 +325,15 @@ export class MakeFaceOp extends MeshOp {
     }
   }
 }
+
 ToolOp.register(MakeFaceOp);
 
 export class FixWindingsOp extends MeshOp {
   static tooldef() {
     return {
-      uiname : "Fix Windings",
-      toolpath : "mesh.fix_windings",
-      inputs : ToolOp.inherit({})
+      uiname  : "Fix Windings",
+      toolpath: "mesh.fix_windings",
+      inputs  : ToolOp.inherit({})
     }
   }
 
@@ -314,14 +350,15 @@ export class FixWindingsOp extends MeshOp {
     }
   }
 }
+
 ToolOp.register(FixWindingsOp);
 
 export class FixMeshOp extends MeshOp {
   static tooldef() {
     return {
-      uiname : "Fix Mesh",
-      toolpath : "mesh.repair",
-      inputs : ToolOp.inherit({})
+      uiname  : "Fix Mesh",
+      toolpath: "mesh.repair",
+      inputs  : ToolOp.inherit({})
     }
   }
 
@@ -331,4 +368,5 @@ export class FixMeshOp extends MeshOp {
     mesh.validate();
   }
 }
+
 ToolOp.register(FixMeshOp);
