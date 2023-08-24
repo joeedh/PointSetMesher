@@ -169,9 +169,8 @@ export class MeshToolBase extends ToolMode {
       new HotKey("S", [], "transform.scale()|Scale"),
       new HotKey("R", [], "transform.rotate()|Rotate"),
       new HotKey("E", [], "mesh.split_selected_edges()"),
-      new HotKey("D", [], "mesh.dissolve_vertex()"),
-      new HotKey("X", [], "mesh.delete()"),
-      new HotKey("Delete", [], "mesh.delete()"),
+      new HotKey("X", [], "mesh.dissolve_vertex()"),
+      new HotKey("Delete", [], "mesh.dissolve_vertex()"),
       new HotKey("L", [], "mesh.select_linked(pick=true mode='ADD')|Select Linked"),
       new HotKey("L", ["SHIFT"], "mesh.select_linked(pick=true mode='SUB')|Deselect Linked"),
       new HotKey("F", [], "mesh.make_face"),
@@ -185,6 +184,7 @@ export class MeshToolBase extends ToolMode {
     this.ctx = ctx;
 
     let mesh = this.ctx.mesh;
+    let dpi = UIBase.getDPI();
 
     let w = 8;
 
@@ -213,8 +213,21 @@ export class MeshToolBase extends ToolMode {
       vlists.push(mesh.handles);
     }
 
+    g.strokeStyle = "rgba(10, 10, 10, 0.2)"
+
     for (let list of vlists) {
       for (let v of list.visible) {
+        if (v.type === MeshTypes.VERTEX) {
+          let scale = 45.0;
+
+          v.checkNormal();
+
+          g.beginPath();
+          g.moveTo(v[0], v[1]);
+          g.lineTo(v[0] + v.no[0]*scale, v[1] + v.no[1]*scale);
+          g.stroke();
+        }
+
         g.fillStyle = color2css(getElemColor(list, v));
         g.beginPath();
         g.rect(v[0] - w*0.5, v[1] - w*0.5, w, w);
@@ -243,6 +256,17 @@ export class MeshToolBase extends ToolMode {
       }
 
       g.fill();
+    }
+
+    if (this.ctx.properties.drawTree) {
+      mesh.checkSpatialTree();
+      mesh.spatialTree.draw(canvas, g);
+    }
+
+    if (this.ctx.properties.drawSpheres) {
+      for (let v of mesh.verts.visible) {
+        v.sphere.draw(canvas, g);
+      }
     }
   }
 

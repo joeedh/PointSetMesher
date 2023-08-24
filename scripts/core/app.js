@@ -12,10 +12,13 @@ import {Context} from './context.js';
 export const STARTUP_FILE_KEY = "_startup_file_apss";
 
 export const Properties = {
-  dimen  : {type: "int", value: 1, min: 32, max: 1024, slideSpeed: 15, baseUnit: "none", displayUnit: "none"},
-  boolVal: {type: "bool", value: true},
-  dist   : {type: "float", value: 0.5, baseUnit: "meter", displayUnit: "meter"},
-  percent: {type: "float", value: 0.5, displayUnit: "percent", baseUnit: "none", min: 0.0, max: 1.0, decimalPlaces: 0},
+  dimen      : {type: "int", value: 1, min: 32, max: 1024, slideSpeed: 15, baseUnit: "none", displayUnit: "none"},
+  drawTree   : {type: "bool", value: true},
+  drawSpheres: {type: "bool", value: true},
+  dist       : {type: "float", value: 0.5, baseUnit: "meter", displayUnit: "meter"},
+  percent    : {
+    type: "float", value: 0.5, displayUnit: "percent", baseUnit: "none", min: 0.0, max: 1.0, decimalPlaces: 0
+  },
 };
 
 window.addEventListener("contextmenu", (e) => {

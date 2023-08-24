@@ -8,7 +8,8 @@ import config from '../config/config.js';
 'use strict';
 
 export * from './mesh_base.js';
-import {MeshFlags, MeshFeatures, MeshTypes} from './mesh_base.js';
+import {MeshFlags, MeshFeatures, MeshTypes, RegenFlags} from './mesh_base.js';
+import {QuadTree} from '../apss/octree.js';
 
 const sel = [1, 0.8, 0, 1];
 const high = [1, 0.8, 0.7, 1]
@@ -131,17 +132,146 @@ function mixinVector3(cls) {
   }
 }
 
+const no_temp1 = new Vector3();
+const no_temp2 = new Vector3();
+
+/* Actually a circle for now. */
+export class Sphere {
+  static idGen = 0;
+
+  constructor() {
+    this.r = 1;
+    this.cent = new Vector3();
+    this.ks = new Float64Array(4);
+    this.id = -1;
+
+    for (let i = 0; i < this.ks.length; i++) {
+      this.ks[i] = 1.0;
+    }
+  }
+
+  recalcCentRadius() {
+    /*
+    on factor;
+    off period;
+
+    dt := x*x + y*y;
+    f  := k1*dt + k2*x + k3*y + k4;
+
+    dx := df(f, x);
+    dy := df(f, y);
+    grad := dx*dx + dy*dy;
+    dx2 := df(grad, x);
+    dy2 := df(grad, y);
+
+    f1 := dx2;
+    f2 := dy2;
+    cent := solve({f1, f2}, {x, y});
+
+    on fort;
+    cx := part(cent, 1, 1, 2);
+    cy := part(cent, 1, 2, 2);
+    off fort;
+    */
+    
+    let [k1, k2, k3, k4] = this.ks;
+
+    this.cent[0] = (-k2)/(2*k1);
+    this.cent[1] = (-k3)/(2*k1);
+
+  }
+
+  draw(canvas, g) {
+
+  }
+
+  evaluate(p) {
+    const ks = this.ks;
+    const dot = p[0]*p[0] + p[1]*p[1];
+
+    return ks[0]*dot + ks[1]*p[1] + ks[2]*p[2] + ks[3];
+  }
+}
+
+Sphere.STRUCT = `
+mesh.Sphere {
+  ks      :    array(float);
+  r       :    float;
+  cent    :    vec3;
+  id      :    int;
+}
+`;
+nstructjs.register(Sphere);
+
 //has Vector3 mixin
 export class Vertex extends Element {
   constructor(co) {
     super(MeshTypes.VERTEX);
     this.initVector3();
 
+    this.sphere = new Sphere();
+    this.no = new Vector3();
+    this.flag |= MeshFlags.RECALC_NORMAL;
+
     if (co !== undefined) {
       this.load(co);
     }
 
     this.edges = [];
+  }
+
+  checkNormal() {
+    if (this.flag & MeshFlags.RECALC_NORMAL) {
+      this.calcNormal();
+    }
+
+    return this;
+  }
+
+  flagUpdate() {
+    this.flag |= MeshFlags.RECALC_NORMAL;
+    return this;
+  }
+
+  calcNormal() {
+    this.flag &= ~MeshFlags.RECALC_NORMAL;
+
+    if (this.edges.length === 0) {
+      this.no.zero();
+      this.no[1] = 1;
+      return;
+    }
+
+    let no = this.no;
+    let e = this.edges[0];
+
+    if (e.l) {
+      no.load(e.l.next.v).sub(e.l.v).normalize();
+    } else {
+      no.load(e.v2).sub(e.v1).normalize();
+    }
+
+    let t = no[1];
+    no[1] = no[0];
+    no[0] = -t;
+
+    if (this.edges.length > 1) {
+      e = this.edges[1];
+
+      let no2 = no_temp1;
+
+      if (e.l) {
+        no2.load(e.l.next.v).sub(e.l.v).normalize();
+      } else {
+        no2.load(e.v2).sub(e.v1).normalize();
+      }
+
+      let t = no2[1];
+      no2[1] = no2[0];
+      no2[0] = -t;
+
+      no.add(no2).normalize();
+    }
   }
 
   toJSON() {
@@ -188,6 +318,8 @@ Vertex.STRUCT = nstructjs.inherit(Vertex, Element, "mesh.Vertex") + `
   1           : float;
   2           : float;
   edges       : array(e, int) | e.eid;
+  no          : vec3;
+  sphere      : mesh.Sphere;
 }
 `;
 nstructjs.register(Vertex);
@@ -948,6 +1080,8 @@ export class Mesh {
     this.makeElists();
 
     this.features = 0;
+    this.regen = RegenFlags.SPATIAL_TREE;
+    this.spatialTree = undefined;
 
     if (config.MESH_HANDLES) {
       this.features |= MeshFeatures.HANDLES;
@@ -989,6 +1123,24 @@ export class Mesh {
     this.loops = this.elists[MeshTypes.LOOP];
     this.lists = this.elists[MeshTypes.LOOPLIST];
     this.faces = this.elists[MeshTypes.FACE];
+  }
+
+  calcMinMax() {
+    let d = Number.MAX_VALUE;
+
+    if (this.verts.length === 0) {
+      return [new Vector3(), new Vector3()];
+    }
+
+    let min = new Vector3().addScalar(d);
+    let max = new Vector3().addScalar(-d);
+
+    for (let v of this.verts) {
+      min.min(v);
+      max.max(v);
+    }
+
+    return [min, max];
   }
 
   makeElists() {
@@ -1045,11 +1197,44 @@ export class Mesh {
     return ret;
   }
 
+  regenSpatialTree() {
+    this.regen |= RegenFlags.SPATIAL_TREE;
+  }
+
+  checkSpatialTree() {
+    if (this.regen & RegenFlags.SPATIAL_TREE) {
+      this.genSpatialTree();
+    }
+  }
+
+  genSpatialTree() {
+    this.regen &= ~RegenFlags.SPATIAL_TREE;
+
+    let [min, max] = this.calcMinMax();
+
+    let pad = min.vectorDistance(max)*0.5;
+    if (pad === 0) {
+      return;
+    }
+
+    min.addScalar(-pad);
+    max.addScalar(pad);
+
+    this.spatialTree = new QuadTree(min, max);
+    for (let v of this.verts) {
+      this.spatialTree.addPoint(v);
+    }
+  }
+
   makeVertex(co) {
     let v = new Vertex(co);
 
+    v.sphere.id = Sphere.idGen++;
+
     this._element_init(v);
     this.verts.push(v);
+
+    this.regenSpatialTree();
 
     return v;
   }
@@ -1083,6 +1268,9 @@ export class Mesh {
   makeEdge(v1, v2) {
     let e = new Edge();
 
+    v1.flagUpdate();
+    v2.flagUpdate();
+
     e.v1 = v1;
     e.v2 = v2;
 
@@ -1101,6 +1289,8 @@ export class Mesh {
 
     this._element_init(e);
     this.edges.push(e);
+
+    this.regenSpatialTree();
 
     return e;
   }
@@ -1123,11 +1313,15 @@ export class Mesh {
 
     this.eidMap.delete(v.eid);
     this.verts.remove(v);
+    this.regenSpatialTree();
 
     v.eid = -1;
   }
 
   killEdge(e) {
+    e.v1.flagUpdate();
+    e.v2.flagUpdate();
+
     if (e.eid === -1) {
       console.trace("Warning: edge", e.eid, "already freed", e);
       return;
@@ -1158,6 +1352,7 @@ export class Mesh {
 
     e.v1.edges.remove(e);
     e.v2.edges.remove(e);
+    this.regenSpatialTree();
   }
 
   radialLoopRemove(e, l) {
@@ -1196,6 +1391,8 @@ export class Mesh {
   killFace(f) {
     for (let list of f.lists) {
       for (let l of list) {
+        l.v.flagUpdate();
+
         this.radialLoopRemove(l.e, l);
 
         this._killLoop(l);
@@ -1206,6 +1403,7 @@ export class Mesh {
 
     this.eidMap.delete(f.eid);
     this.faces.remove(f);
+    this.regenSpatialTree();
     f.eid = -1;
   }
 
@@ -1251,6 +1449,7 @@ export class Mesh {
     list.l = firstl;
 
     f.lists.push(list);
+    this.regenSpatialTree();
   }
 
   makeFace(vs) {
@@ -1266,6 +1465,8 @@ export class Mesh {
 
     for (let i = 0; i < vs.length; i++) {
       let v1 = vs[i], v2 = vs[(i + 1)%vs.length];
+
+      v1.flagUpdate();
 
       let e = this.getEdge(v1, v2);
       if (!e) {
@@ -1299,6 +1500,7 @@ export class Mesh {
 
     list.l = firstl;
 
+    this.regenSpatialTree();
     f.lists.push(list);
     return f;
     /*
@@ -1368,6 +1570,10 @@ export class Mesh {
   splitEdge(e, t = 0.5) {
     let nv = this.makeVertex(e.v1).interp(e.v2, t);
     let ne = this.makeEdge(nv, e.v2);
+
+    e.v1.flagUpdate();
+    nv.flagUpdate();
+    e.v2.flagUpdate();
 
     e.v2.edges.remove(e);
     e.v2 = nv;
@@ -1577,6 +1783,8 @@ export class Mesh {
     let faces = new Set();
 
     for (let e of v.edges) {
+      e.otherVertex(v).flagUpdate();
+
       for (let l of e.loops) {
         if (l.v !== v) {
           l = l.next;
@@ -1669,6 +1877,8 @@ export class Mesh {
   loadSTRUCT(reader) {
     reader(this);
 
+    this.regen |= RegenFlags.SPATIAL_TREE;
+
     let elists = this.elists;
     this.elists = {};
 
@@ -1687,6 +1897,10 @@ export class Mesh {
     }
 
     for (let v of this.verts) {
+      v.flagUpdate();
+
+      Sphere.idGen = Math.max(Sphere.idGen, v.sphere.id + 1);
+
       for (let i = 0; i < v.edges.length; i++) {
         v.edges[i] = eidMap.get(v.edges[i]);
       }

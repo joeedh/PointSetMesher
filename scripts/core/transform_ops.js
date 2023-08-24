@@ -118,6 +118,8 @@ export class TransformVert extends TransformElem {
   static undo(mesh, selMask, data) {
     let vlen = VectorSize + 1;
 
+    mesh.regenSpatialTree();
+
     for (let i = 0; i < data.length; i += vlen) {
       let eid = data[i];
 
@@ -125,6 +127,10 @@ export class TransformVert extends TransformElem {
       if (!elem) {
         console.error("Missing element " + eid);
         continue;
+      }
+
+      if (elem.type === MeshTypes.VERTEX) {
+        elem.flagUpdate();
       }
 
       for (let j = 0; j < VectorSize; j++) {
@@ -149,6 +155,7 @@ export class TransformVert extends TransformElem {
   apply(matrix) {
     this.v.load(this.start);
     this.v.multVecMatrix(matrix);
+    this.v.flagUpdate();
   }
 }
 
@@ -176,6 +183,10 @@ export class TransformOp extends ToolOp {
         center : new VecProperty()
       }
     }
+  }
+
+  updateMesh(mesh) {
+    mesh.regenSpatialTree();
   }
 
   calcTransCenter(tdata) {
@@ -348,6 +359,7 @@ export class TranslateOp extends TransformOp {
       }
     }
 
+    this.updateMesh(ctx.mesh);
     window.redraw_all();
   }
 }
@@ -428,6 +440,7 @@ export class ScaleOp extends TransformOp {
       }
     }
 
+    this.updateMesh(ctx.mesh);
     window.redraw_all();
   }
 }
@@ -505,6 +518,7 @@ export class RotateOp extends TransformOp {
       }
     }
 
+    this.updateMesh(ctx.mesh);
     window.redraw_all();
   }
 }

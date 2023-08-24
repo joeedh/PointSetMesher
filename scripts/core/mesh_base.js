@@ -1,4 +1,3 @@
-
 export const MeshTypes = {
   VERTEX  : 1,
   EDGE    : 2,
@@ -9,10 +8,15 @@ export const MeshTypes = {
 }
 
 export const MeshFlags = {
-  SELECT: 1,
-  HIDE  : 2
+  SELECT       : 1,
+  HIDE         : 2,
+  RECALC_NORMAL: 4,
 }
 
 export const MeshFeatures = {
-  HANDLES : 0
+  HANDLES: 0
+};
+
+export const RegenFlags = {
+  SPATIAL_TREE: 1
 };
